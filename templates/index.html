@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Directory Tree</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+<h1>Directory Tree</h1>
+<ul>
+    {% for directory, files in tree.items() %}
+    <li>{{ directory }}
+        <ul>
+            {% for file in files %}
+            <li><a href="{{ url_for('files', filename=file) }}" target="_blank">{{ file }}</a></li>
+            {% endfor %}
+        </ul>
+    </li>
+    {% endfor %}
+    <div class="button-container">
+        <a href="/edit" target="_blank">
+            <button class="write-feedback">Write feedback</button>
+        </a> <!-- Add this line to create a button link to the edit page -->
+    </div>
+</ul>
+</body>
+</html>

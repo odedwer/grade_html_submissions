@@ -1,0 +1,144 @@
+/* General body styling */
+body {
+    font-family: 'Courier', sans-serif;
+    background-color: #f4f4f9;
+    margin: 0;
+    padding: 20px;
+    color: #333;
+}
+
+/* Form styling */
+form {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    width: 80%;
+    height: 80%;
+    margin: auto;
+}
+
+/* Dropdown and textarea styling */
+select, textarea {
+    width: 100%;
+    padding: 10px;
+    margin-top: 8px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box; /* Include padding in width/height */
+    font-size: 14px
+}
+
+select:focus, textarea:focus {
+    border-color: #0056b3;
+}
+
+/* Button styling */
+button {
+    width: 100%;
+    padding: 10px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 12px;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+/* Alert styling */
+.alert {
+    padding: 5px;
+    background-color: #00c853; /* green */
+    color: black;
+    margin-bottom: 15px;
+    border-radius: 4px;
+}
+
+/* Link back to directory tree */
+.back-link {
+    display: block;
+    margin-bottom: 20px;
+    text-align: center;
+    color: #007bff;
+    text-decoration: none;
+}
+
+/* General list styling */
+ul.directory-list {
+    list-style-type: none;
+    padding: 0;
+}
+
+ul.directory-list li {
+    margin-top: 5px;
+    position: relative;
+}
+
+ul.directory-list li::before {
+    content: "";
+    position: absolute;
+    left: -20px;
+    top: 0;
+    bottom: 0;
+    width: 15px;
+    border-left: 2px solid #ccc;
+}
+
+ul.directory-list li::after {
+    content: "";
+    position: absolute;
+    left: -2px;
+    top: 0;
+    width: 20px;
+    border-bottom: 2px solid #ccc;
+}
+
+ul.directory-list ul {
+    margin-left: 20px; /* Incremental left margin for nested lists */
+}
+
+.directory-list a {
+    padding: 4px 8px;
+    display: block;
+    text-decoration: none;
+    color: #007bff;
+    font-weight: bold;
+}
+
+.directory-list a:hover {
+    text-decoration: underline;
+}
+
+
+/* Page title styling */
+h1 {
+    text-align: center;
+    color: #333;
+}
+
+/* Centering the button container */
+.button-container {
+    text-align: center;
+    margin-top: 20px;  /* Adjust margin to create space from the content above */
+}
+
+/* Styling the button for a more modern appearance */
+button.write-feedback {
+    font-size: 16px;
+    padding: 10px 20px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    width: 50%;
+}
+
+button:hover.write-feedback{
+    background-color: #0056b3;
+}

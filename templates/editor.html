@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit and Save File</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <a href="/" class="back-link">Back to Directory Tree</a>
+    <h1>Select a File and Enter Text</h1>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for message in messages %}
+          <div class="alert">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    <form action="/save-text" method="post">
+        <select name="selected_file">
+            {% for directory, files in tree.items() %}
+                {% for file in files %}
+                    <option value="{{ file }}">{{ file }}</option>
+                {% endfor %}
+            {% endfor %}
+        </select><br>
+        <textarea name="text_content" rows="10" cols="30" placeholder="Enter text here..."></textarea><br>
+        <button type="submit">Save Text</button>
+    </form>
+</body>
+</html>

@@ -1,0 +1,4 @@
+Flask==3.0.3
+jupyter==1.0.0
+jupyter_server==2.14.1
+tqdm==4.57.0
