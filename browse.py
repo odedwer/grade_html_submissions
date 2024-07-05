@@ -34,10 +34,22 @@ def files(filename):
     return send_from_directory(data_directory, filename)
 
 
-@app.route('/edit', methods=['GET'])
+@app.route('/edit', methods=['GET', 'POST'])
 def edit():
     tree = make_tree(data_directory)
-    return render_template('editor.html', tree=tree)
+    feedback_content = ""
+
+    if request.method == 'POST':
+        selected_file = request.form['selected_file']
+        feedback_path = os.path.join(data_directory, os.path.dirname(selected_file), 'feedback.txt')
+
+        if os.path.exists(feedback_path):
+            with open(feedback_path, 'r', encoding='utf-8') as f:
+                feedback_content = f.read()
+
+        return render_template('editor.html', tree=tree, selected_file=selected_file, feedback_content=feedback_content)
+
+    return render_template('editor.html', tree=tree, selected_file="", feedback_content=feedback_content)
 
 
 @app.route('/save-text', methods=['POST'])

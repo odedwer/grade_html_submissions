@@ -16,15 +16,18 @@
         {% endfor %}
       {% endif %}
     {% endwith %}
-    <form action="/save-text" method="post">
-        <select name="selected_file">
+    <form action="/edit" method="post">
+        <select name="selected_file" onchange="this.form.submit()">
             {% for directory, files in tree.items() %}
                 {% for file in files %}
-                    <option value="{{ file }}">{{ file }}</option>
+                    <option value="{{ file }}" {% if file == selected_file %}selected{% endif %}>{{ file }}</option>
                 {% endfor %}
             {% endfor %}
         </select><br>
-        <textarea name="text_content" rows="10" cols="30" placeholder="Enter text here..."></textarea><br>
+    </form>
+    <form action="/save-text" method="post">
+        <input type="hidden" name="selected_file" value="{{ selected_file }}">
+        <textarea name="text_content" rows="10" cols="30" placeholder="Enter text here...">{{ feedback_content }}</textarea><br>
         <button type="submit">Save Text</button>
     </form>
 </body>
