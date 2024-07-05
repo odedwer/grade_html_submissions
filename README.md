@@ -1,4 +1,4 @@
-# Converts to html and allows for easy grading
+# Converts to html and allows for easy grading of jupyter notebooks
 
 # Requirements:
 1. Be able to run in the following command in the system terminal:
