@@ -1,10 +1,11 @@
 from flask import Flask, render_template, send_from_directory, request, redirect, flash, url_for
 import os
+import json
 
 app = Flask(__name__)
 app.secret_key = 'COMDEPRI'  # Set a secret key for session management
-
-data_directory = os.path.abspath('data')  # Absolute path to the data directory
+LAB = 4  # Specify the lab number
+data_directory = os.path.join(os.path.abspath('data'),f'lab{LAB}')  # Absolute path to the data directory
 
 
 @app.route('/')
@@ -41,10 +42,12 @@ def edit():
 
     if request.method == 'POST':
         selected_file = request.form['selected_file']
-        feedback_path = os.path.join(data_directory, os.path.dirname(selected_file), 'feedback.txt')
+        # get the directory from the selected file
+        directory = os.path.dirname(selected_file)
+        file_path = os.path.join(data_directory, directory, 'feedback.txt')
 
-        if os.path.exists(feedback_path):
-            with open(feedback_path, 'r', encoding='utf-8') as f:
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
                 feedback_content = f.read()
 
         return render_template('editor.html', tree=tree, selected_file=selected_file, feedback_content=feedback_content)
@@ -52,23 +55,58 @@ def edit():
     return render_template('editor.html', tree=tree, selected_file="", feedback_content=feedback_content)
 
 
+
 @app.route('/save-text', methods=['POST'])
 def save_text():
     filename = request.form['selected_file']
     text_content = request.form['text_content']
+
     if filename and text_content:
-        # Determine the directory of the selected file
         file_path = os.path.join(data_directory, filename)
         directory = os.path.dirname(file_path)
 
-        # Create a new text file in the same directory
-        new_file_path = os.path.join(directory, "feedback.txt")
-        with open(new_file_path, 'w', encoding='utf-8') as f:
-            f.write(text_content)
+        # Locate the `.ipynb` file in the directory
+        ipynb_file = next((f for f in os.listdir(directory) if f.endswith('.ipynb')), None)
 
-        flash(f'{directory} feedback saved successfully!')
+        if ipynb_file:
+            group_members_ids = extract_member_ids(directory, ipynb_file)
+
+            if group_members_ids:
+                # Loop through all folders in the data directory
+                for folder_name in os.listdir(data_directory):
+                    folder_path = os.path.join(data_directory, folder_name)
+                    # find the ipynb file in the folder, search for it
+                    ipynb_file_new = next((f for f in os.listdir(folder_path) if f.endswith('.ipynb')), None)
+                    if ipynb_file_new:
+                        group_members_ids_new = extract_member_ids(folder_path, ipynb_file_new)
+                        if group_members_ids_new == group_members_ids:
+                            # Save the feedback in the relevant folder
+                            feedback_file_path = os.path.join(folder_path, 'feedback.txt')
+                            with open(feedback_file_path, 'w', encoding='utf-8') as f:
+                                f.write(text_content)
+
+
+        flash(f'Feedback saved successfully in relevant folders!')
         return redirect(url_for('edit'))
     return 'Error: File or text content not provided', 400
+
+
+def extract_member_ids(directory, ipynb_file):
+    ipynb_path = os.path.join(directory, ipynb_file)
+    with open(ipynb_path, 'r', encoding='utf-8') as f:
+        notebook_data = json.load(f)
+    # Extract `group_members_ids` from the first code cell
+    group_members_ids = None
+    for cell in notebook_data.get('cells', []):
+        if cell.get('cell_type') == 'code':
+            try:
+                group_members_ids = cell.get('source', [])[-1]  # Get the last line of the code cell
+                group_members_ids = group_members_ids[group_members_ids.find("=") + 1:group_members_ids.find(
+                    "#")].strip()  # Extract the value after '='
+                break
+            except IndexError:
+                continue
+    return group_members_ids
 
 
 if __name__ == '__main__':

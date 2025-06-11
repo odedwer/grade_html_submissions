@@ -1,6 +1,6 @@
 import os
 from tqdm import tqdm
-LAB = 2
+LAB = 4
 
 lab_dir =os.path.join('data', f'Lab{LAB}')
 if not os.path.isdir(lab_dir):
