@@ -4,7 +4,7 @@ import json
 
 app = Flask(__name__)
 app.secret_key = 'COMDEPRI'  # Set a secret key for session management
-LAB = 4  # Specify the lab number
+LAB = 5  # Specify the lab number
 data_directory = os.path.join(os.path.abspath('data'),f'lab{LAB}')  # Absolute path to the data directory
 
 
@@ -25,6 +25,10 @@ def make_tree(path):
             if file.endswith('.html'):
                 file_path = os.path.join(relative_dir, file)
                 tree[relative_dir].append(file_path.replace(os.sep, '/'))  # Use URL friendly slashes
+
+    # order the dict by the second hebrew word in the key
+    tree = {k: v for k, v in sorted(tree.items(), key=lambda item: item[0].split('_')[0].split(' ')[1] if len(item[0].split('_')) > 1 else item[0]) if k!='.' and k!='..'}
+
     return tree
 
 
@@ -110,4 +114,4 @@ def extract_member_ids(directory, ipynb_file):
 
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    app.run(debug=False, port=5050)
