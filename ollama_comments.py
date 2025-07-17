@@ -1,15 +1,41 @@
 import json
 import os
 import re
-
+from collections import defaultdict
+from pyexpat.errors import messages
+from time import time as get_time
 import nbformat
 import ollama
 import nbformat
 from nbconvert import HTMLExporter
+import threading
+import time
+import ollama
+import base64
+from io import BytesIO
+from PIL import Image
+from tqdm import tqdm
 
-OLLAMA_MODEL = "gemma3n:latest"
+OLLAMA_MODEL = "llava:7b"
 LAB = 5  # Specify the lab number
 data_directory = os.path.join(os.path.abspath('data'), f'lab{LAB}')  # Absolute path to the data directory
+
+
+def keep_model_alive(model='gemma3:27b-it-qat', interval=300):
+    def ping():
+        while True:
+            try:
+                ollama.chat(
+                    model=model,
+                    messages=[{'role': 'system', 'content': 'keepalive'}],
+                    stream=False  # avoids printing tokens
+                )
+            except Exception as e:
+                print(f"[keepalive error] {e}")
+            time.sleep(interval)
+
+    thread = threading.Thread(target=ping, daemon=True)
+    thread.start()
 
 
 def make_tree(path):
@@ -21,8 +47,8 @@ def make_tree(path):
         for file in files:
             if file.endswith('.ipynb'):
                 file_path = os.path.join(relative_dir, file)
-                text_file_path = file_path.replace('.ipynb', '.html')
-                tree[relative_dir].append(text_file_path.replace(os.sep, '/'))  # Use URL friendly slashes
+                # text_file_path = file_path.replace('.ipynb', '.html')
+                tree[relative_dir].append(file_path.replace(os.sep, '/'))  # Use URL friendly slashes
 
     # order the dict by the second hebrew word in the key
     tree = {k: v for k, v in sorted(tree.items(), key=lambda item: item[0].split('_')[0].split(' ')[1] if len(
@@ -67,122 +93,238 @@ def get_groups():
                     groups[group_members_ids].append(folder_name)
 
 
+def get_questions_and_answers(contents):
+    """
+    Extracts question and answer cells from the notebook contents.
+    Questions are identified by 'question' in their source, and answers by 'answer'.
+    """
+    question_cells = {re.search(r'part\s*\d+\s*-\s*question \d+', cell['source'].lower())[0]: (i, cell) for i, cell in
+                      enumerate(contents['cells']) if
+                      re.search(r'question \d+', cell['source'].lower()) and 'your code goes here' not in cell[
+                          'source'].lower() and 'textual answer' not in cell[
+                          'source'].lower() and "#@title part " not in cell['source'].lower()}
+
+    answer_cells = [(i, cell) for i, cell in enumerate(contents['cells']) if
+                    re.search(r'answer \d*', cell['source'].lower()) and i not in [idx for idx, _ in
+                                                                                   question_cells.values()]]
+    answer_cells.extend(
+        [(i + 1, contents['cells'][i + 1]) for i, cell in question_cells.values() if
+         i + 1 < len(contents['cells']) and i + 1 not in [idx for idx, _ in answer_cells]])
+
+    # remove duplicates based on the cell index
+    answer_cells = sorted(list({i: (i, cell) for i, cell in answer_cells}.values()), key=lambda x: x[0])
+
+    # group the answer cells into arrays, one cell array per question based on the question re match
+    answer_cells_dict = {}
+    for q in question_cells.keys():
+        answer_cells_dict[q] = []
+        for i, cell in answer_cells:
+            search_res = re.search(r'part\s*\d+\s*-\s*question \d+', cell['source'].lower())
+            if not search_res or q != search_res[0]:
+                continue
+
+            answer_cells_dict[q].append((i, cell))
+
+    return question_cells, answer_cells
+
+
+def resize_base64_image(base64_str, max_size=256):
+    # Step 1: Decode base64 to image
+    image_data = base64.b64decode(base64_str)
+
+    image = Image.open(BytesIO(image_data)).convert("RGB")  # force RGB to avoid mode issues
+    image.verify()
+    # Step 2: Resize while maintaining aspect ratio
+    image.thumbnail((max_size, max_size), Image.LANCZOS)  # LANCZOS = high-quality downscaling
+
+    # Step 3: Re-encode to base64 (as PNG or JPEG)
+    output_buffer = BytesIO()
+    image.save(output_buffer, format="PNG")  # or "JPEG" to reduce even more
+    resized_bytes = output_buffer.getvalue()
+    return base64.b64encode(resized_bytes).decode("utf-8")
+
+
+def cell_to_src_and_outputs(cell):
+    """
+    Convert a notebook cell to its source code and outputs.
+    """
+    source = cell['source']
+    text_outputs = []
+    image_outputs = []
+    if 'outputs' in cell:
+        for output in cell['outputs']:
+            if 'data' not in output:
+                continue
+            for key in output['data']:
+                if 'text/plain' == key:
+                    text_outputs.append(output['data'][key])
+                elif 'image/png' == key:
+                    image_outputs.append(resize_base64_image(output['data'][key].replace('\n', '')))
+    if text_outputs:
+        source = "Source:\n" + source + "\n===== Text Outputs: =====\n" + "\n".join(text_outputs) + "\n"
+    else:
+        source = "Source:\n" + source + "\n"
+    return source, image_outputs
+
+
+# %%
+
 files_tree = make_tree(data_directory)
 
 student_notebook_path = files_tree[list(files_tree.keys())[0]][0]  # Get the first notebook file path
-full_solution_path = os.path.join(data_directory, "lab{}_full_solution.html".format(LAB))
+full_solution_path = os.path.join(data_directory, "lab{}_full_solution.ipynb".format(LAB))
 
 try:
     with open(os.path.join(data_directory, student_notebook_path), 'r') as f:
-        student_notebook_content = f.read()
+        student_notebook_content = nbformat.read(f, as_version=4)
 except FileNotFoundError:
     print(f"Error: Student notebook not found at {os.path.join(data_directory, student_notebook_path)}")
     # exit()
 
 try:
     with open(full_solution_path, 'r') as f:
-        full_solution_content = f.read()
+        full_solution_content = nbformat.read(f, as_version=4)
 except FileNotFoundError:
     print(f"Error: Full solution code not found at {full_solution_path}")
     # exit()
 
-
 # %%
 
-def get_questions_and_answers(contents):
-    """
-    Extracts question and answer cells from the notebook contents.
-    Questions are identified by 'question' in their source, and answers by 'answer'.
-    """
-    question_cells = [(i, cell) for i, cell in enumerate(contents['cells']) if
-                      re.search(r'question \d+', cell['source'].lower())]
-    answer_cells = [(i, cell) for i, cell in enumerate(contents['cells']) if
-                    re.search(r'answer \d*', cell['source'].lower())]
-    answer_cells.extend(
-        [(i + 1, contents['cells'][i + 1]) for i, cell in question_cells if i + 1 < len(contents['cells'])])
 
-    # remove duplicates based on the cell index
-    answer_cells = sorted(list({i: (i, cell) for i, cell in answer_cells}.values()), key=lambda x: x[0])
+prompt = {'role': 'system',
+          'content': """
+Act as a teacher assistant reviewing a student's Jupyter notebook submission, given to you in blocks of cells.
+You will be given the solution content in one message, followed by the student answer. 
 
-    return question_cells, answer_cells
+Analyze the student's answer in comparison to the correct solution.
+Provide brief, concise comments on the student's submission, only for places where their solution and approach differs from the correct solution.
+Never summarize the student's answer, only comment on it.
+If you do comment, make sure you only provide the following:
+- If the missed part of the question - which part.
+- Key differences or missing steps, and errors.
 
-with open('data/lab5/lab5_full_solution.ipynb', 'r'):
-    correct_contents = nbformat.read(f, as_version=4)
-_, answer_cells_correct = get_questions_and_answers(correct_contents)
+**If there is nothing to comment on, do not provide any comment.**
+Never provide improvements or suggestions for code, only comment on the student's answer and figures.
+Respond with brief, concise and clear comments.
+Only provide the specific comments, without any additional text or explanations.
+Comment on the student answer only.
+Be brief, focus on textual answers where they exist.
+Comment on the content only, and not on styling or formatting.
+Provide the comments as if you are addressing the student directly, using "You" and "Your" in your comments.
+Don't describe what the student did, unless you are pointing out what is wrong.
+"""}
+stud_offset = 1
 
+paired_cells = []
+for i, ans_cell in enumerate(full_solution_content.cells):
+    stud_cell = student_notebook_content.cells[i + stud_offset]
+    while ans_cell['metadata']['id'] != stud_cell['metadata']['id']:
+        stud_offset += 1
+        stud_cell = student_notebook_content.cells[i + stud_offset]
+    ans_source, ans_image_outputs = cell_to_src_and_outputs(ans_cell)
+    stud_source, stud_image_outputs = cell_to_src_and_outputs(stud_cell)
+    paired_cells.append((ans_source, ans_image_outputs, stud_source, stud_image_outputs))
+responses = []
+lookahead = 10
+for i in tqdm(range(len(paired_cells) - lookahead)):
+    cells = paired_cells[i:i + lookahead]
+    ans_source = "\n".join([cell[0] for cell in cells])
+    ans_image_outputs = [img for cell in cells for img in cell[1]]
+    stud_source = "\n".join([cell[2] for cell in cells])
+    stud_image_outputs = [img for cell in cells for img in cell[3]]
+    messages = [
+        prompt,
+        {
+            'role': 'user',
+            'content': f"Content from the solution:\n{ans_source}",
+            'images': ans_image_outputs,
+        },
+        {
+            'role': 'assistant',
+            'content': 'Understood, you have given me the solution, now I will get the student answer and comment as if I\'m directly addressing the student.',
+        },
+        {
+            'role': 'user',
+            'content': f"Content from the student:\n{stud_source}",
+            'images': stud_image_outputs,
+        }
+    ]
 
-# %% convert the question cells to html, with source and output
+    response = ollama.chat(
+        model=OLLAMA_MODEL,
+        messages=messages,
+        stream=False
+    )
+    responses.append(response['message']['content'])
 
-def convert_cells_to_html(stud_file):
-    with open(stud_file, 'r', encoding='utf-8') as f:
-        nb = nbformat.read(f, as_version=4)
-    q_cells, a_cells = get_questions_and_answers(nb)
-    indices = [i for i, cell in q_cells]
-    indices.extend([i for i, cell in a_cells])
-    indices = sorted(set(indices))  # Unique and sorted indices
-    nb.cells = [nb.cells[i] for i in cell_indices if i < len(nb.cells)]
-    for i, cell in cells:
-        if cell['cell_type'] == 'code':
-            source = "\n".join(cell['source'])
-            outputs = ""
-            if 'outputs' in cell:
-                for output in cell['outputs']:
-                    if 'text' in output:
-                        outputs += "<pre>{}</pre>".format("\n".join(output['text']))
-                    elif 'data' in output:
-                        if 'text/plain' in output['data']:
-                            outputs += "<pre>{}</pre>".format(output['data']['text/plain'])
-                        elif 'image/png' in output['data']:
-                            outputs += "<img src='data:image/png;base64,{}'>".format(output['data']['image/png'])
+# %% question and answer cell ids
+q_ids = dict()
+ans_ids = defaultdict(list)
+for cell in full_solution_content.cells:
+    cell_id = cell['metadata']['id']
+    if 'question' in cell['source'].lower():
+        q = re.search(r'part\s*\d+\s*-\s*question \d+', cell['source'].lower())
+        if q:
+            ans_match = re.search(r'textual answer', cell['source'].lower()) #or re.search(
+                # r'#@title part\s*\d+\s*-\s*question\s*\d+', cell['source'].lower())
+            if ans_match:
+                ans_ids[q[0]].append(cell_id)
+            else:
+                q_ids[q[0]] = cell_id
 
-            html_content += f"<div class='code-cell'><h3>Cell {i} (Code)</h3><pre>{source}</pre>{outputs}</div>"
-        elif cell['cell_type'] == 'markdown':
-            html_content += f"<div class='markdown-cell'><h3>Cell {i} (Markdown)</h3>{cell['source']}</div>"
-    return html_content
+# %% Take each q and ans, get the student answer and the solution answer, format them for a prompt, and send to Ollama
+for q in q_ids.keys():
+    ans_cell_ids = ans_ids[q]
+    q_cell = student_notebook_content.cells[student_notebook_content.cells.index(
+        next(cell for cell in student_notebook_content.cells if cell['metadata']['id'] == q_ids[q]))]
+    stud_ans_cells = [student_notebook_content.cells[student_notebook_content.cells.index(
+        next(cell for cell in student_notebook_content.cells if cell['metadata']['id'] == q_id))] for q_id in
+                      ans_cell_ids]
+    sol_ans_cells = [full_solution_content.cells[full_solution_content.cells.index(
+        next(cell for cell in full_solution_content.cells if cell['metadata']['id'] == q_id))] for q_id in
+                     ans_cell_ids]
+    q_src, q_image_outputs = cell_to_src_and_outputs(q_cell)
 
+    stud_ans_srcs = []
+    stud_ans_image_outputs = []
+    for ans_cell in stud_ans_cells:
+        ans_src, ans_image_outputs = cell_to_src_and_outputs(ans_cell)
+        stud_ans_srcs.append(ans_src)
+        stud_ans_image_outputs.extend(ans_image_outputs)
 
-stud_file = 'data/lab5/אופיר בראל_936191_assignsubmission_file/Copy_of_DS4All_Lab_5_Dimensionality_Reduction.ipynb'
-# Convert the answer cells to HTML
-question_html = convert_cells_to_html(question_cells)
-answer_html = convert_cells_to_html(answer_cells)
-correct_answer_html = convert_cells_to_html(answer_cells_correct)
-# Combine the question and answer HTML
-combined_html = f"""
-<div class='questions-answers-correct-answers'>
-    <h2>Questions and Answers</h2>
-    <div class='questions'>{question_html}</div>
-    <div class='answers'>{answer_html}</div>
-    <div class='correct-answers'>{answer_html}</div>
-</div>
-"""
+    sol_ans_srcs = []
+    sol_ans_image_outputs = []
+    for ans_cell in sol_ans_cells:
+        ans_src, ans_image_outputs = cell_to_src_and_outputs(ans_cell)
+        sol_ans_srcs.append(ans_src)
+        sol_ans_image_outputs.extend(ans_image_outputs)
 
-prompt = f"""
-You are a helpful teaching assistant reviewing a student's Jupyter notebook submission, converted to an HTML file, starting with questions, then the student answers and then the correct answers.
-Here is the HTML file with the student's submission and the correct solution:
-{combined_html}
+    messages = [
+        prompt,
+        {
+            'role': 'user',
+            'content': f"""
+            This is the question: {q_src}
+            This is the solution answer: {'\n'.join(sol_ans_srcs)}
+            """,
+            'images': sol_ans_image_outputs,
+        },
+        {
+            'role': 'assistant',
+            'content': 'Understood, you have given me the solution, now I will get the student answer and comment as if I\'m directly addressing the student.',
+        },
+        {
+            'role': 'user',
+            'content': f"""
+        This is the student answer: {'\n'.join(stud_ans_srcs)}
+        """,
+            # 'images': stud_ans_image_outputs,
+        }
+    ]
 
------
-Task:
-Analyze the student's code and output. Explain the errors, suggest improvements, and compare the student's approach to the correct solution.
-Provide comments on the student's submission, only for places where their solution and approach differs from the correct solution.
-In you comments, make sure that you start with the part and question numbers, and that you highlight:
-- Key differences or missing steps.
-- Potential areas for improvement or clarification.
-- Specific feedback on code and textual answers.
-- What was right and what was wrong in their textual answers.
-- Whether they answered all parts of the question.
-
-Respond with concise and clear comments. Only provide comments for the parts that differ from the correct solution, and that require feedback.
-Your response should be structured as follows:
-* part 1 Question 1: [Your comments here]
-* part 1 Question 2: [Your comments here]
-...
-* part N Question X: [Your comments here]
-"""
-
-response = ollama.generate(model=OLLAMA_MODEL, prompt=prompt,
-                           options={'num_ctx': 2 ** 14})
-
-# %%
-with open('chk.html', 'w') as f:
-    f.write(combined_html)
+    response = ollama.chat(
+        model=OLLAMA_MODEL,
+        messages=messages,
+        stream=False
+    )
+    print(f"* {q}: {response['message']['content']}")
